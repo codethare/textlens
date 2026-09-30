@@ -1,0 +1,6 @@
+[package]
+name = "textlens"
+version = "0.1.0"
+edition = "2024"
+description = "Select a region of a Wayland screen and copy the text inside it to the clipboard"
+license = "MIT"
