@@ -11,6 +11,8 @@ slurp  →  grim -g - -  →  tesseract stdin stdout -l <lang>  →  wl-copy
 
 - A compositor with `wlr-screencopy` (sway, Hyprland, …) and `wlr-layer-shell` (slurp)
 - `slurp`, `grim`, `tesseract`, `wl-copy` (from wl-clipboard)
+- For `--focused`: `grim` 1.5+ and a compositor exporting `ext-foreign-toplevel-list`
+  and `ext-image-copy-capture` (river; sway does not)
 
 Arch Linux:
 
@@ -49,23 +51,12 @@ When the pointer is unusable, name the region instead of dragging it:
 
 ```sh
 textlens --full                     # every output
-textlens --focused                  # the focused window (sway; needs swaymsg + jq)
+textlens --focused                  # the focused window (needs grim 1.5+)
 textlens --geometry '20,10 640x480'
 ```
 
 `--geometry`, `--focused` and `--full` are mutually exclusive; without any of them,
 the region is picked with the pointer.
-
-Pick the window with sway's own vim-style focus bindings, then OCR it — no pointer
-used at any point:
-
-```
-bindsym $mod+h focus left
-bindsym $mod+j focus down
-bindsym $mod+k focus up
-bindsym $mod+l focus right
-bindsym $mod+Shift+t exec textlens --focused
-```
 
 ## Behaviour
 

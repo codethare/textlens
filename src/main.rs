@@ -9,6 +9,8 @@
 use std::io::{self, Write};
 use std::process::{Command, Output, Stdio};
 
+mod toplevel;
+
 const DEFAULT_LANG: &str = "eng";
 
 const USAGE: &str = "\
@@ -20,12 +22,12 @@ USAGE:
 OPTIONS:
     -l, --lang <LANG>      tesseract language(s), e.g. eng+chi_sim (default: eng)
     -g, --geometry <REG>   capture this region instead of picking one, e.g. '20,10 640x480'
-    -f, --focused          capture the focused window (sway + jq, no pointer)
+    -f, --focused          capture the focused window (no pointer)
         --full             capture every output (no pointer)
     -h, --help             print this help
 
 Without --geometry, --focused or --full, the region is picked with the pointer.
-Requires: slurp, grim, tesseract, wl-copy; swaymsg + jq only for --focused
+Requires: slurp, grim (1.5+, for --focused), tesseract, wl-copy
 Exit codes: 0 copied, 1 cancelled or failed, 2 bad arguments
 ";
 
@@ -117,16 +119,15 @@ fn set_region(slot: &mut Option<Region>, region: Region) -> Result<(), String> {
 }
 
 fn capture_text(args: &Args) -> Result<(), Failure> {
-    let geometry = match &args.region {
+    let png = match &args.region {
+        Region::Focused => grim_toplevel(&toplevel::focused_identifier().map_err(fail)?)?,
         Region::Pick => match slurp()? {
-            Some(geometry) => Some(geometry),
+            Some(geometry) => grim(Some(&geometry))?,
             None => return Err(Failure::Cancelled),
         },
-        Region::Geometry(geometry) => Some(geometry.clone()),
-        Region::Focused => Some(focused_window()?),
-        Region::Full => None,
+        Region::Geometry(geometry) => grim(Some(geometry))?,
+        Region::Full => grim(None)?,
     };
-    let png = grim(geometry.as_deref())?;
     let raw = tesseract(&png, &args.lang)?;
     let text = cleanup(&raw).ok_or_else(|| fail("no text recognised in the selection"))?;
     copy(&text)
@@ -153,22 +154,18 @@ fn slurp() -> Result<Option<String>, Failure> {
     Err(fail(format!("slurp failed: {}", stderr_or_status(&out))))
 }
 
-/// Focused window geometry, using the `swaymsg` + `jq` one-liner from grim's README.
-fn focused_window() -> Result<String, Failure> {
-    const FILTER: &str =
-        r#".. | select(.type?) | select(.focused).rect | "\(.x),\(.y) \(.width)x\(.height)""#;
-    let tree = run_capture("swaymsg", &["-t", "get_tree"])?;
-    let mut cmd = Command::new("jq");
-    cmd.args(["-j", FILTER]);
-    let out = run_piped(&mut cmd, &tree).map_err(|e| run_error("jq", e))?;
+/// PNG of one toplevel, captured by its `ext_foreign_toplevel_list_v1` identifier.
+fn grim_toplevel(identifier: &str) -> Result<Vec<u8>, Failure> {
+    let mut cmd = Command::new("grim");
+    cmd.args(["-T", identifier, "-"]);
+    let out = run_piped(&mut cmd, b"").map_err(|e| run_error("grim", e))?;
     if !out.status.success() {
-        return Err(fail(format!("jq failed: {}", stderr_or_status(&out))));
+        return Err(fail(format!("grim failed: {}", stderr_or_status(&out))));
     }
-    let geometry = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if geometry.is_empty() {
-        return Err(fail("sway reported no focused window"));
+    if out.stdout.is_empty() {
+        return Err(fail("grim produced no image"));
     }
-    Ok(geometry)
+    Ok(out.stdout)
 }
 
 /// PNG on stdout. `None` captures every output, `Some` only that geometry.
@@ -238,17 +235,6 @@ fn run_piped(cmd: &mut Command, input: &[u8]) -> io::Result<Output> {
     // EPIPE is expected when the child exits without reading all of stdin.
     let _ = writer.join();
     Ok(out)
-}
-
-fn run_capture(tool: &str, args: &[&str]) -> Result<Vec<u8>, Failure> {
-    let out = Command::new(tool)
-        .args(args)
-        .output()
-        .map_err(|e| run_error(tool, e))?;
-    if !out.status.success() {
-        return Err(fail(format!("{tool} failed: {}", stderr_or_status(&out))));
-    }
-    Ok(out.stdout)
 }
 
 fn run_error(tool: &str, err: io::Error) -> Failure {
